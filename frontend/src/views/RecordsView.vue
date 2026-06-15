@@ -7,6 +7,52 @@
     <section class="form-panel">
       <div class="form-grid">
         <label>
+          起始日期
+          <input v-model="filter.startDate" type="date" @change="onFilterChange" />
+        </label>
+        <label>
+          截止日期
+          <input v-model="filter.endDate" type="date" @change="onFilterChange" />
+        </label>
+        <label class="checkbox-line" style="align-self:end">
+          <button class="secondary-btn" @click="resetFilter">重置</button>
+        </label>
+      </div>
+    </section>
+
+    <div v-if="summary" class="metrics-grid">
+      <div class="metric">
+        <span>期初库存</span>
+        <strong>{{ summary.grand.opening }}</strong>
+      </div>
+      <div class="metric">
+        <span>入库合计</span>
+        <strong>{{ summary.grand.totalIn }}</strong>
+      </div>
+      <div class="metric">
+        <span>出库合计</span>
+        <strong>{{ summary.grand.totalOut }}</strong>
+      </div>
+      <div class="metric">
+        <span>期末库存</span>
+        <strong>{{ summary.grand.closing }}</strong>
+      </div>
+    </div>
+
+    <section v-if="summary && summary.items.length" class="panel" style="margin-bottom:18px">
+      <h2>各原料汇总</h2>
+      <DataTable :columns="summaryColumns" :rows="summary.items">
+        <template #opening="{ row }">{{ row.opening }} {{ row.unit }}</template>
+        <template #totalIn="{ row }">{{ row.totalIn }} {{ row.unit }}</template>
+        <template #totalOut="{ row }">{{ row.totalOut }} {{ row.unit }}</template>
+        <template #closing="{ row }">{{ row.closing }} {{ row.unit }}</template>
+      </DataTable>
+    </section>
+
+    <section class="form-panel">
+      <h2 style="margin:0 0 14px;font-size:16px">新增记录</h2>
+      <div class="form-grid">
+        <label>
           原料
           <select v-model.number="form.ingredientId">
             <option disabled :value="null">选择原料</option>
@@ -68,7 +114,14 @@ import { formatDateTime } from '../utils/format'
 
 const records = ref([])
 const ingredients = ref([])
+const summary = ref(null)
 const error = ref('')
+
+const filter = reactive({
+  startDate: '',
+  endDate: ''
+})
+
 const form = reactive({
   ingredientId: null,
   recordType: 'in',
@@ -77,6 +130,7 @@ const form = reactive({
   source: '',
   note: ''
 })
+
 const columns = [
   { key: 'ingredientName', label: '原料' },
   { key: 'recordType', label: '类型' },
@@ -86,14 +140,44 @@ const columns = [
   { key: 'createdAt', label: '时间' }
 ]
 
+const summaryColumns = [
+  { key: 'ingredientName', label: '原料' },
+  { key: 'opening', label: '期初' },
+  { key: 'totalIn', label: '入库' },
+  { key: 'totalOut', label: '出库' },
+  { key: 'closing', label: '期末' }
+]
+
+function buildParams() {
+  const params = {}
+  if (filter.startDate) params.startDate = filter.startDate
+  if (filter.endDate) params.endDate = filter.endDate + 'T23:59:59'
+  return params
+}
+
 async function loadRecords() {
-  const res = await recordsApi.list()
+  const res = await recordsApi.list(buildParams())
   records.value = res.data
+}
+
+async function loadSummary() {
+  const res = await recordsApi.summary(buildParams())
+  summary.value = res.data
 }
 
 async function loadOptions() {
   const res = await inventoryApi.options()
   ingredients.value = res.data.ingredients
+}
+
+async function onFilterChange() {
+  await Promise.all([loadRecords(), loadSummary()])
+}
+
+function resetFilter() {
+  filter.startDate = ''
+  filter.endDate = ''
+  onFilterChange()
 }
 
 async function submitRecord() {
@@ -108,13 +192,13 @@ async function submitRecord() {
       source: '',
       note: ''
     })
-    await Promise.all([loadRecords(), loadOptions()])
+    await Promise.all([loadRecords(), loadOptions(), loadSummary()])
   } catch (err) {
     error.value = err.response?.data?.message || '登记失败'
   }
 }
 
 onMounted(async () => {
-  await Promise.all([loadRecords(), loadOptions()])
+  await Promise.all([loadRecords(), loadOptions(), loadSummary()])
 })
 </script>
