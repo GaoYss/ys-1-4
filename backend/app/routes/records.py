@@ -36,15 +36,13 @@ def list_records():
             pass
     ed_exclusive = _parse_end_of_day(end_date)
 
-    query = StockRecord.query
-    if record_type:
-        query = query.filter_by(record_type=record_type)
+    all_q = StockRecord.query
     if sd:
-        query = query.filter(StockRecord.created_at >= sd)
+        all_q = all_q.filter(StockRecord.created_at >= sd)
     if ed_exclusive:
-        query = query.filter(StockRecord.created_at < ed_exclusive)
+        all_q = all_q.filter(StockRecord.created_at < ed_exclusive)
 
-    records_in_range = query.order_by(
+    all_records = all_q.order_by(
         StockRecord.created_at.asc(), StockRecord.id.asc()
     ).all()
 
@@ -54,7 +52,9 @@ def list_records():
     for ing in ingredients:
         net_from_start_q = StockRecord.query.filter_by(ingredient_id=ing.id)
         if sd:
-            net_from_start_q = net_from_start_q.filter(StockRecord.created_at >= sd)
+            net_from_start_q = net_from_start_q.filter(
+                StockRecord.created_at >= sd
+            )
         in_from_start = (
             net_from_start_q.filter_by(record_type="in")
             .with_entities(func.coalesce(func.sum(StockRecord.quantity), 0))
@@ -69,10 +69,10 @@ def list_records():
             float(ing.stock) - float(in_from_start) + float(out_from_start), 2
         )
 
-    running = dict(opening)
-    enriched = []
-    for r in records_in_range:
-        before = running.get(r.ingredient_id, 0)
+    running = {k: float(v) for k, v in opening.items()}
+    enriched_all = []
+    for r in all_records:
+        before = running.get(r.ingredient_id, 0.0)
         if r.record_type == "in":
             after = before + float(r.quantity)
         else:
@@ -81,10 +81,40 @@ def list_records():
         d = r.to_dict()
         d["balanceBefore"] = round(before, 2)
         d["balanceAfter"] = round(after, 2)
-        enriched.append(d)
+        enriched_all.append(d)
 
-    enriched.reverse()
-    return jsonify(enriched)
+    closing = {
+        ing_id: round(val, 2) for ing_id, val in running.items()
+    }
+
+    if record_type:
+        filtered = [r for r in enriched_all if r["recordType"] == record_type]
+    else:
+        filtered = enriched_all
+
+    filtered.reverse()
+
+    opening_grand = round(sum(opening.values()), 2)
+    closing_grand = round(sum(closing.values()), 2)
+
+    opening_by_ingredient = [
+        {
+            "ingredientId": i.id,
+            "ingredientName": i.name,
+            "unit": i.unit,
+            "opening": opening.get(i.id, 0),
+        }
+        for i in ingredients
+    ]
+
+    return jsonify(
+        {
+            "records": filtered,
+            "openingGrand": opening_grand,
+            "closingGrand": closing_grand,
+            "openingByIngredient": opening_by_ingredient,
+        }
+    )
 
 
 @records_bp.post("")

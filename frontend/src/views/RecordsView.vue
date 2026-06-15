@@ -89,24 +89,45 @@
 
     <p v-if="error" class="error-text">{{ error }}</p>
 
-    <DataTable :columns="columns" :rows="records">
-      <template #recordType="{ row }">
-        <StatusBadge
-          :label="row.recordType === 'in' ? '入库' : '出库'"
-          :variant="row.recordType === 'in' ? 'success' : 'warning'"
-        />
-      </template>
-      <template #quantity="{ row }">{{ row.quantity }} {{ row.unit }}</template>
-      <template #balanceBefore="{ row }">
-        <span v-if="row.balanceBefore !== undefined">{{ row.balanceBefore }} {{ row.unit }}</span>
-        <span v-else>-</span>
-      </template>
-      <template #balanceAfter="{ row }">
-        <span v-if="row.balanceAfter !== undefined">{{ row.balanceAfter }} {{ row.unit }}</span>
-        <span v-else>-</span>
-      </template>
-      <template #createdAt="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-    </DataTable>
+    <div class="table-wrap records-table">
+      <table>
+        <thead>
+          <tr>
+            <th v-for="col in columns" :key="col.key">{{ col.label }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="bookend-row opening-row">
+            <td colspan="3"><strong>期初合计</strong></td>
+            <td class="bookend-value" colspan="2"><strong>{{ listMeta.openingGrand }}</strong></td>
+            <td colspan="3"></td>
+          </tr>
+          <tr v-if="!records.length">
+            <td :colspan="columns.length" class="empty-cell">暂无数据</td>
+          </tr>
+          <tr v-for="row in records" :key="row.id">
+            <td>{{ row.ingredientName }}</td>
+            <td>
+              <StatusBadge
+                :label="row.recordType === 'in' ? '入库' : '出库'"
+                :variant="row.recordType === 'in' ? 'success' : 'warning'"
+              />
+            </td>
+            <td>{{ row.quantity }} {{ row.unit }}</td>
+            <td>{{ row.balanceBefore !== undefined ? row.balanceBefore + ' ' + row.unit : '-' }}</td>
+            <td>{{ row.balanceAfter !== undefined ? row.balanceAfter + ' ' + row.unit : '-' }}</td>
+            <td>{{ row.operator }}</td>
+            <td>{{ row.source }}</td>
+            <td>{{ formatDateTime(row.createdAt) }}</td>
+          </tr>
+          <tr class="bookend-row closing-row">
+            <td colspan="3"><strong>期末合计</strong></td>
+            <td class="bookend-value" colspan="2"><strong>{{ listMeta.closingGrand }}</strong></td>
+            <td colspan="3"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 </template>
 
@@ -124,6 +145,10 @@ const records = ref([])
 const ingredients = ref([])
 const summary = ref(null)
 const error = ref('')
+const listMeta = reactive({
+  openingGrand: 0,
+  closingGrand: 0
+})
 
 const filter = reactive({
   startDate: '',
@@ -167,7 +192,9 @@ function buildParams() {
 
 async function loadRecords() {
   const res = await recordsApi.list(buildParams())
-  records.value = res.data
+  records.value = res.data.records || []
+  listMeta.openingGrand = res.data.openingGrand ?? 0
+  listMeta.closingGrand = res.data.closingGrand ?? 0
 }
 
 async function loadSummary() {
@@ -212,3 +239,30 @@ onMounted(async () => {
   await Promise.all([loadRecords(), loadOptions(), loadSummary()])
 })
 </script>
+
+<style scoped>
+.records-table .bookend-row {
+  background: #fbfcfa;
+  font-size: 13px;
+  color: #526057;
+}
+
+.records-table .bookend-row strong {
+  font-size: 14px;
+  color: #223029;
+}
+
+.records-table .bookend-value {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.records-table .opening-row td {
+  border-bottom: 1px solid #e7ede7;
+}
+
+.records-table .closing-row td {
+  border-top: 2px solid #e7ede7;
+  border-bottom: none;
+}
+</style>
