@@ -7,6 +7,14 @@
     <section class="form-panel">
       <div class="form-grid">
         <label>
+          类型
+          <select v-model="filter.recordType" @change="onFilterChange">
+            <option value="">全部</option>
+            <option value="in">仅入库</option>
+            <option value="out">仅出库</option>
+          </select>
+        </label>
+        <label>
           起始日期
           <input v-model="filter.startDate" type="date" @change="onFilterChange" />
         </label>
@@ -151,6 +159,7 @@ const listMeta = reactive({
 })
 
 const filter = reactive({
+  recordType: '',
   startDate: '',
   endDate: ''
 })
@@ -185,6 +194,7 @@ const summaryColumns = [
 
 function buildParams() {
   const params = {}
+  if (filter.recordType) params.type = filter.recordType
   if (filter.startDate) params.startDate = filter.startDate
   if (filter.endDate) params.endDate = filter.endDate
   return params
@@ -212,6 +222,7 @@ async function onFilterChange() {
 }
 
 function resetFilter() {
+  filter.recordType = ''
   filter.startDate = ''
   filter.endDate = ''
   onFilterChange()

@@ -148,6 +148,7 @@ def create_record():
 
 @records_bp.get("/summary")
 def records_summary():
+    record_type = request.args.get("type", "").strip()
     start_date = request.args.get("startDate", "").strip()
     end_date = request.args.get("endDate", "").strip()
 
@@ -165,11 +166,17 @@ def records_summary():
 
     for ing in ingredients:
         range_q = StockRecord.query.filter_by(ingredient_id=ing.id)
+        range_q_all = StockRecord.query.filter_by(ingredient_id=ing.id)
 
         if sd:
             range_q = range_q.filter(StockRecord.created_at >= sd)
+            range_q_all = range_q_all.filter(StockRecord.created_at >= sd)
         if ed_exclusive:
             range_q = range_q.filter(StockRecord.created_at < ed_exclusive)
+            range_q_all = range_q_all.filter(StockRecord.created_at < ed_exclusive)
+
+        if record_type:
+            range_q = range_q.filter_by(record_type=record_type)
 
         total_in = (
             range_q.filter_by(record_type="in")
@@ -178,6 +185,17 @@ def records_summary():
         )
         total_out = (
             range_q.filter_by(record_type="out")
+            .with_entities(func.coalesce(func.sum(StockRecord.quantity), 0))
+            .scalar()
+        )
+
+        total_in_all = (
+            range_q_all.filter_by(record_type="in")
+            .with_entities(func.coalesce(func.sum(StockRecord.quantity), 0))
+            .scalar()
+        )
+        total_out_all = (
+            range_q_all.filter_by(record_type="out")
             .with_entities(func.coalesce(func.sum(StockRecord.quantity), 0))
             .scalar()
         )
@@ -206,8 +224,14 @@ def records_summary():
                 .scalar()
             )
 
-        opening = float(ing.stock) - float(total_in) + float(total_out) - float(after_in) + float(after_out)
-        closing = opening + float(total_in) - float(total_out)
+        opening = (
+            float(ing.stock)
+            - float(total_in_all)
+            + float(total_out_all)
+            - float(after_in)
+            + float(after_out)
+        )
+        closing = opening + float(total_in_all) - float(total_out_all)
 
         result.append(
             {
