@@ -97,6 +97,14 @@
         />
       </template>
       <template #quantity="{ row }">{{ row.quantity }} {{ row.unit }}</template>
+      <template #balanceBefore="{ row }">
+        <span v-if="row.balanceBefore !== undefined">{{ row.balanceBefore }} {{ row.unit }}</span>
+        <span v-else>-</span>
+      </template>
+      <template #balanceAfter="{ row }">
+        <span v-if="row.balanceAfter !== undefined">{{ row.balanceAfter }} {{ row.unit }}</span>
+        <span v-else>-</span>
+      </template>
       <template #createdAt="{ row }">{{ formatDateTime(row.createdAt) }}</template>
     </DataTable>
   </section>
@@ -135,6 +143,8 @@ const columns = [
   { key: 'ingredientName', label: '原料' },
   { key: 'recordType', label: '类型' },
   { key: 'quantity', label: '数量' },
+  { key: 'balanceBefore', label: '操作前余额' },
+  { key: 'balanceAfter', label: '操作后余额' },
   { key: 'operator', label: '经办人' },
   { key: 'source', label: '来源/用途' },
   { key: 'createdAt', label: '时间' }
@@ -151,7 +161,7 @@ const summaryColumns = [
 function buildParams() {
   const params = {}
   if (filter.startDate) params.startDate = filter.startDate
-  if (filter.endDate) params.endDate = filter.endDate + 'T23:59:59'
+  if (filter.endDate) params.endDate = filter.endDate
   return params
 }
 

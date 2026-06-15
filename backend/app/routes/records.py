@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 from sqlalchemy import func
@@ -9,28 +9,82 @@ from ..models import Ingredient, StockRecord
 records_bp = Blueprint("records", __name__)
 
 
+def _parse_end_of_day(value):
+    if not value:
+        return None
+    try:
+        ed = datetime.fromisoformat(value)
+        if ed.hour == 0 and ed.minute == 0 and ed.second == 0 and ed.microsecond == 0:
+            return ed + timedelta(days=1)
+        return ed + timedelta(microseconds=1)
+    except ValueError:
+        return None
+
+
 @records_bp.get("")
 def list_records():
     record_type = request.args.get("type", "").strip()
     start_date = request.args.get("startDate", "").strip()
     end_date = request.args.get("endDate", "").strip()
-    query = StockRecord.query
-    if record_type:
-        query = query.filter_by(record_type=record_type)
+
+    sd = None
+    ed_exclusive = None
     if start_date:
         try:
             sd = datetime.fromisoformat(start_date)
-            query = query.filter(StockRecord.created_at >= sd)
         except ValueError:
             pass
-    if end_date:
-        try:
-            ed = datetime.fromisoformat(end_date)
-            query = query.filter(StockRecord.created_at <= ed)
-        except ValueError:
-            pass
-    records = query.order_by(StockRecord.created_at.desc()).all()
-    return jsonify([record.to_dict() for record in records])
+    ed_exclusive = _parse_end_of_day(end_date)
+
+    query = StockRecord.query
+    if record_type:
+        query = query.filter_by(record_type=record_type)
+    if sd:
+        query = query.filter(StockRecord.created_at >= sd)
+    if ed_exclusive:
+        query = query.filter(StockRecord.created_at < ed_exclusive)
+
+    records_in_range = query.order_by(
+        StockRecord.created_at.asc(), StockRecord.id.asc()
+    ).all()
+
+    ingredients = Ingredient.query.all()
+
+    opening = {}
+    for ing in ingredients:
+        net_from_start_q = StockRecord.query.filter_by(ingredient_id=ing.id)
+        if sd:
+            net_from_start_q = net_from_start_q.filter(StockRecord.created_at >= sd)
+        in_from_start = (
+            net_from_start_q.filter_by(record_type="in")
+            .with_entities(func.coalesce(func.sum(StockRecord.quantity), 0))
+            .scalar()
+        )
+        out_from_start = (
+            net_from_start_q.filter_by(record_type="out")
+            .with_entities(func.coalesce(func.sum(StockRecord.quantity), 0))
+            .scalar()
+        )
+        opening[ing.id] = round(
+            float(ing.stock) - float(in_from_start) + float(out_from_start), 2
+        )
+
+    running = dict(opening)
+    enriched = []
+    for r in records_in_range:
+        before = running.get(r.ingredient_id, 0)
+        if r.record_type == "in":
+            after = before + float(r.quantity)
+        else:
+            after = before - float(r.quantity)
+        running[r.ingredient_id] = after
+        d = r.to_dict()
+        d["balanceBefore"] = round(before, 2)
+        d["balanceAfter"] = round(after, 2)
+        enriched.append(d)
+
+    enriched.reverse()
+    return jsonify(enriched)
 
 
 @records_bp.post("")
@@ -68,17 +122,13 @@ def records_summary():
     end_date = request.args.get("endDate", "").strip()
 
     sd = None
-    ed = None
+    ed_exclusive = None
     if start_date:
         try:
             sd = datetime.fromisoformat(start_date)
         except ValueError:
             pass
-    if end_date:
-        try:
-            ed = datetime.fromisoformat(end_date)
-        except ValueError:
-            pass
+    ed_exclusive = _parse_end_of_day(end_date)
 
     ingredients = Ingredient.query.order_by(Ingredient.name).all()
     result = []
@@ -88,8 +138,8 @@ def records_summary():
 
         if sd:
             range_q = range_q.filter(StockRecord.created_at >= sd)
-        if ed:
-            range_q = range_q.filter(StockRecord.created_at <= ed)
+        if ed_exclusive:
+            range_q = range_q.filter(StockRecord.created_at < ed_exclusive)
 
         total_in = (
             range_q.filter_by(record_type="in")
@@ -104,22 +154,30 @@ def records_summary():
 
         after_in = 0
         after_out = 0
-        if ed:
+        if ed_exclusive:
             after_in = (
-                StockRecord.query.filter_by(ingredient_id=ing.id, record_type="in")
-                .filter(StockRecord.created_at > ed)
-                .with_entities(func.coalesce(func.sum(StockRecord.quantity), 0))
+                StockRecord.query.filter_by(
+                    ingredient_id=ing.id, record_type="in"
+                )
+                .filter(StockRecord.created_at >= ed_exclusive)
+                .with_entities(
+                    func.coalesce(func.sum(StockRecord.quantity), 0)
+                )
                 .scalar()
             )
             after_out = (
-                StockRecord.query.filter_by(ingredient_id=ing.id, record_type="out")
-                .filter(StockRecord.created_at > ed)
-                .with_entities(func.coalesce(func.sum(StockRecord.quantity), 0))
+                StockRecord.query.filter_by(
+                    ingredient_id=ing.id, record_type="out"
+                )
+                .filter(StockRecord.created_at >= ed_exclusive)
+                .with_entities(
+                    func.coalesce(func.sum(StockRecord.quantity), 0)
+                )
                 .scalar()
             )
 
-        opening = ing.stock - total_in + total_out - after_in + after_out
-        closing = opening + total_in - total_out
+        opening = float(ing.stock) - float(total_in) + float(total_out) - float(after_in) + float(after_out)
+        closing = opening + float(total_in) - float(total_out)
 
         result.append(
             {
@@ -127,8 +185,8 @@ def records_summary():
                 "ingredientName": ing.name,
                 "unit": ing.unit,
                 "opening": round(opening, 2),
-                "totalIn": round(total_in, 2),
-                "totalOut": round(total_out, 2),
+                "totalIn": round(float(total_in), 2),
+                "totalOut": round(float(total_out), 2),
                 "closing": round(closing, 2),
             }
         )
